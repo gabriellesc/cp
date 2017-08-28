@@ -5,6 +5,7 @@ class ContractGenerator
   REGULAR_LEFT_ALIGN = 2
   SMALL_LEFT_ALIGN = 3
   SIGNATURE = 4
+  INITIAL = 5
   HEADER_X_COORD = 0.7
   HEADER_Y_COORD = 0.5
 
@@ -17,27 +18,31 @@ class ContractGenerator
       @whitespace = Prawn::Text::NBSP * 5
       @tab = Prawn::Text::NBSP * 10
       define_grid(columns: 75, rows: 100, gutter: 0)
-      templates = ["header", "letter", "signature", "office_form", "salary"]
+      templates = ["header", "letter", "general_info", "signature", "office_form"]
       @parser = TemplateParser.new(templates, @offer)
       header_end = set_header(HEADER_X_COORD, HEADER_Y_COORD, @parser.get_data("header"))
       salary_page = set_letter(header_end, @parser.get_data("letter"))
+      set_ta_coord_signature(@letter_end, @parser.get_data("signature"))
       if no_office_use_only_box
-        signature_end = set_signature(5, @letter_end, @parser.get_data("signature"))
-        last_page = set_form(signature_end, @parser.get_data("office_form"))
-        set_salary(@salary_start, salary_page, @parser.get_data("salary"))
-        go_to_page(last_page)
+        set_applicant_signature(@letter_end, offer, false)
+        set_form(@parser.get_data("office_form"))
       else
-        signature_end = set_signature(5, @letter_end, @parser.get_data("signature"))
-        last_page = page_count
-        set_salary(@salary_start, salary_page, @parser.get_data("salary"))
-        go_to_page(last_page)
+        set_applicant_signature(@letter_end, offer, true)
+        start_new_page
+        set_letter(HEADER_X_COORD, @parser.get_data("general_info"))
       end
     end
   end
 
   private
   def get_font(name)
-    return "#{Rails.root}/app/services/templates/fonts/#{name}.ttf"
+    ttf = "#{Rails.root}/app/services/templates/fonts/#{name}.ttf"
+    font_families.update(
+    name => { bold: ttf,
+                italic: ttf,
+                bold_italic: ttf,
+                normal: ttf })
+    return name
   end
 
   def get_style(type, text)
@@ -70,6 +75,13 @@ class ContractGenerator
         text: text,
         align: :left,
       }
+    when INITIAL
+      return {
+        font: "Times-Roman",
+        font_size: 16,
+        text: text,
+        align: :left,
+      }
     end
   end
 
@@ -95,12 +107,12 @@ class ContractGenerator
   # false by default, so that there is no unintended top_padding to the text within
   # the grid.
   # "fill" and "top_padding" are used as part of the office only form to create the grid.
-  def set_text(grids, data, fill = false, top_padding = false)
+  def set_text(grids, data, fill = false, top_padding = false, pad = 7)
     grid(grids[0], grids[1]).bounding_box() do
       font data[:font]
       font_size data[:font_size]
       if top_padding
-        move_down 3
+        move_down pad
       end
       if fill
         stroke_bounds
@@ -212,12 +224,12 @@ class ContractGenerator
   def set_letter_text(text, num_lines)
     num_lines = num_lines + @parser.get_num_line(text)
     if page_count == 1
-      if num_lines > 59
+      if num_lines > 67
         start_new_page
         move_up 50
       end
     else
-      if ((page_count-1)*66)+59< num_lines
+      if ((page_count-1)*66)+67< num_lines
         start_new_page
         move_up 50
       end
@@ -226,26 +238,35 @@ class ContractGenerator
     return num_lines
   end
 
-  def set_signature(x, y, signature_data)
-    if y > 9.3
+  def set_ta_coord_signature(y, signature_data)
+    if y > 10
       start_new_page
       y = 0.5
     end
+    y = y - 0.5
+    x = 5
     set_text(get_grids(x, y, 3, 0.2), get_style(REGULAR_LEFT_ALIGN, signature_data[0]))
-    set_text(get_grids(x, y+0.1, 3, 0.6), get_style(SIGNATURE, ENV['TA_COORD']))
+    set_text(get_grids(x, y+0.15, 3, 0.6), get_style(SIGNATURE, ENV['TA_COORD']))
     set_text(get_grids(x, y+0.6, 3, 0.6), get_style(REGULAR_LEFT_ALIGN, signature_data[1]))
-    return y+1.2
   end
 
-  def set_form(y, form_data)
-    if y > 9.3
-      start_new_page
-      y = 0.5
+  def set_applicant_signature(y, offer, applicant_ver)
+    x = HEADER_X_COORD+0.3
+    draw_line(get_grids(x, y-0.4, 3, 0.6), 0.4)
+    set_text(get_grids(x, y+0.2, 3, 0.6), get_style(SMALL_LEFT_ALIGN, "Applicant Signature".upcase))
+    if offer[:signature]
+      set_text(get_grids(x, y-0.05, 3, 0.6), get_style(INITIAL, offer[:signature]))
     else
-      draw_line(get_grids(1, y-0.1, 7.5, 0.1), 1)
+      if applicant_ver
+        set_text(get_grids(x, y-0.2, 3, 0.6), get_style(REGULAR_LEFT_ALIGN, "<i>Not Yet Electronically Signed</i>"))
+      end
     end
-    set_text(get_grids(1, y, 6.5, 0.2), get_style(REGULAR_LEFT_ALIGN, form_data[0]))
-    set_form_table(get_grids(1, y+0.15, 6.5, 2.9), get_table_data(form_data), form_data.size-2)
+  end
+
+  def set_form(form_data)
+    start_new_page
+    set_text(get_grids(0.5, HEADER_Y_COORD, 7.5, 0.2), get_style(REGULAR_LEFT_ALIGN, form_data[0]))
+    set_form_table(get_grids(0.5, HEADER_Y_COORD+0.15, 7.5, 9), get_table_data(form_data), form_data.size-2)
     return page_count
   end
 
@@ -259,7 +280,7 @@ class ContractGenerator
   end
 
   def set_table_helper(table, num_columns)
-    set_text([[table[:index][0], 0],[table[:index][0], num_columns-1]], get_style(REGULAR_LEFT_ALIGN, table[:label]), false, true)
+    set_text([[table[:index][0], 0],[table[:index][0], num_columns-1]], get_style(REGULAR_LEFT_ALIGN, table[:label]), false, true, 20)
     table[:table].each_with_index do |row, row_num|
       row_multiplier= num_columns/row.length.to_f
       row.each_with_index do |column, index|
@@ -273,30 +294,9 @@ class ContractGenerator
         end
         grids = [[curr_row, horizontal_1], [curr_row, horizontal_2]]
         if index%2 == 0
-          set_text(grids, get_style(REGULAR_LEFT_ALIGN, "<b>#{column}</b>"), true, true)
+          set_text(grids, get_style(REGULAR_LEFT_ALIGN, "<b>#{column}</b>"), true, true, 12)
         else
           set_text(grids, get_style(REGULAR_LEFT_ALIGN, "#{column}"), true, true)
-        end
-      end
-    end
-  end
-
-  def set_salary(y, page, salary_data)
-    go_to_page(page)
-    define_grid(columns: 75, rows: 100, gutter: 0)
-    grids = get_grids(2.5, y+1.2, 2.5, 1)
-    grid(grids[0], grids[1]).bounding_box() do
-      data = salary_data[0].split("\n")
-      define_grid(columns: 1, rows: data.size+1, gutter: 0)
-      set_text([[data.size, 0],[data.size, 0]], get_style(SMALL_LEFT_ALIGN, salary_data[1]))
-      grid([0,0], [2,0]).bounding_box do
-        define_grid(columns: 4, rows: data.size, gutter: 0)
-        draw_line([[data.size-1, 0], [data.size-1, 3]], 0.39)
-        draw_line([[data.size-2, 3], [data.size-2, 3]], 0.1)
-        data.each_with_index do |row, index|
-          values = row.split(",")
-          set_text([[index, 0],[index, 2]], get_style(REGULAR_LEFT_ALIGN, values[0]))
-          set_text([[index, 3],[index, 3]], get_style(REGULAR_LEFT_ALIGN, values[1]))
         end
       end
     end
